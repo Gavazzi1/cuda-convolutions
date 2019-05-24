@@ -1,7 +1,7 @@
 #include <cuda.h>
 #include <time.h>
-#include <cstdlib>
-#include <iostream>
+#include <stdio.h>
+#include <stdlib.h>
 #include <opencv2/opencv.hpp>
 
 #define FILTER_SIZE 3
@@ -40,15 +40,17 @@ void save_image(const char* filename,
 }
 
 __global__ void naive_kernel(float* d_in, int height, int width, float* filter, float* d_out) {
-    // Get global position in image
+    // Get global position in grid
     unsigned int x   = blockIdx.x * blockDim.x + threadIdx.x;
     unsigned int y   = blockIdx.y * blockDim.y + threadIdx.y;
     unsigned int z   = threadIdx.z;
-    //unsigned int loc = z * gridDim.x * blockDim.x * gridDim.y * blockDim.y +
-    //                   y * gridDim.x * blockDim.x +
-    //                   x;
+
+    // actual location within image data
+    // since image data is interleaved RGB values, offset like you would a 2D
+    // image, multiply that by the number of channels (3) and add the z value
+    // representing whether the pixel is R, G, or B
     unsigned int loc = CHANNELS * 
-                       (y * gridDim.x * blockDim.x +
+                       (y * width +
                         x) +
                         z;
 
@@ -68,9 +70,6 @@ __global__ void naive_kernel(float* d_in, int height, int width, float* filter, 
                               (img_y * width +
                                img_x) +
                                img_z;
-                //int img_loc = img_z * width * height +
-                //              img_y * width +
-                //              img_x;
 
                 // filter location based just on x and y
                 int filt_x = i + RADIUS;
@@ -133,9 +132,9 @@ int main(int argc, char** argv) {
     // Initialize filter template
     // clang-format off
     const float filt_template[FILTER_SIZE][FILTER_SIZE] = {
-        {1,  1, 1},
-        {1, -8, 1},
-        {1,  1, 1}
+        {0,  0, 0},
+        {0,  1, 0},
+        {0,  0, 0}
     };
     // clang-format on
 

@@ -172,7 +172,7 @@ SMS_VOLTA ?= 70
 endif
 endif
 
-SMS ?= 30 35 50 53 60 61 $(SMS_VOLTA) 
+SMS ?= 30 35 50 53 60 61 $(SMS_VOLTA) 75 
 
 $(info CUDA VERSION: $(CUDA_VERSION))
 $(info SMS: $(SMS))
@@ -194,7 +194,7 @@ endif
 endif
 
 #INCLUDES += -IFreeImage/include
-LIBRARIES += -lcudart -lcudnn -lstdc++ -lm -lopencv_imgproc -lopencv_core -lopencv_highgui -lopencv_imgcodecs
+LIBRARIES += -lcudart -lstdc++ -lm -lopencv_imgproc -lopencv_core -lopencv_highgui -lopencv_imgcodecs
 
 ifeq ($(SAMPLE_ENABLED),0)
 EXEC ?= @echo "[@]"
@@ -233,5 +233,6 @@ run: build
 clean:
 	rm -rf *o
 	rm -rf naive-conv
+	rm output.png
 
 clobber: clean
