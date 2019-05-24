@@ -1,8 +1,9 @@
 #include <cuda.h>
-#include <time.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <opencv2/opencv.hpp>
+#include <time.h>
+#include "errchk.h"
+#include "imgutils.h"
 
 #define FILTER_SIZE 3
 #define RADIUS ((FILTER_SIZE - 1) / 2)
@@ -11,48 +12,17 @@
 
 #define DEBUG 0
 
-#define gpuErrchk(ans) { gpuAssert((ans), __FILE__, __LINE__); }
-inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=true)
-{
-   if (code != cudaSuccess) 
-   {
-      fprintf(stderr,"GPUassert: %s %s %d\n", cudaGetErrorString(code), file, line);
-      if (abort) exit(code);
-   }
-}
-
-cv::Mat read_image(const char* filename) {
-    cv::Mat h_in = cv::imread(filename, CV_LOAD_IMAGE_COLOR);
-    h_in.convertTo(h_in, CV_32FC3);
-    cv::normalize(h_in, h_in, 0, 1, cv::NORM_MINMAX);
-    return h_in;
-}
-
-void save_image(const char* filename,
-                float* buffer,
-                int height,
-                int width) {
-    cv::Mat output_image(height, width, CV_32FC3, buffer);
-    cv::threshold(output_image, output_image, 0, 0, cv::THRESH_TOZERO);
-    cv::normalize(output_image, output_image, 0.0, 255.0, cv::NORM_MINMAX);
-    output_image.convertTo(output_image, CV_8UC3);
-    cv::imwrite(filename, output_image);
-}
-
 __global__ void naive_kernel(float* d_in, int height, int width, float* filter, float* d_out) {
     // Get global position in grid
-    unsigned int x   = blockIdx.x * blockDim.x + threadIdx.x;
-    unsigned int y   = blockIdx.y * blockDim.y + threadIdx.y;
-    unsigned int z   = threadIdx.z;
+    unsigned int x = blockIdx.x * blockDim.x + threadIdx.x;
+    unsigned int y = blockIdx.y * blockDim.y + threadIdx.y;
+    unsigned int z = threadIdx.z;
 
     // actual location within image data
     // since image data is interleaved RGB values, offset like you would a 2D
     // image, multiply that by the number of channels (3) and add the z value
     // representing whether the pixel is R, G, or B
-    unsigned int loc = CHANNELS * 
-                       (y * width +
-                        x) +
-                        z;
+    unsigned int loc = CHANNELS * (y * width + x) + z;
 
     // sum of all element-wise multiplications
     float sum = 0;
@@ -66,14 +36,11 @@ __global__ void naive_kernel(float* d_in, int height, int width, float* filter, 
                 // x, y, and global location adjusted for filter radius
                 int img_x   = x + i;
                 int img_y   = y + j;
-                int img_loc = CHANNELS *
-                              (img_y * width +
-                               img_x) +
-                               img_z;
+                int img_loc = CHANNELS * (img_y * width + img_x) + img_z;
 
                 // filter location based just on x and y
-                int filt_x = i + RADIUS;
-                int filt_y = j + RADIUS;
+                int filt_x     = i + RADIUS;
+                int filt_y     = j + RADIUS;
                 int filter_loc = filt_y * FILTER_SIZE + filt_x;
 
                 // add element-wise product to accumulator
@@ -86,7 +53,8 @@ __global__ void naive_kernel(float* d_in, int height, int width, float* filter, 
 
 #if DEBUG
         if ((d_in[loc] - 0.0) > 0.001) {
-            printf("x=%d, y=%d, z=%d, loc=%d, d_in=%f, d_out=%f\n", x, y, z, loc, d_in[loc], d_out[loc]);
+            printf("x=%d, y=%d, z=%d, loc=%d, d_in=%f, d_out=%f\n", 
+                   x, y, z, loc, d_in[loc], d_out[loc]);
         }
 #endif
     }
@@ -99,10 +67,10 @@ int main(int argc, char** argv) {
     }
 
     // read in image
-    cv::Mat h_in = read_image(argv[1]);
-    int height = h_in.rows;
-    int width =  h_in.cols;
-    int channels = h_in.channels();
+    cv::Mat h_in     = read_image(argv[1]);
+    int     height   = h_in.rows;
+    int     width    = h_in.cols;
+    int     channels = h_in.channels();
 
 #if DEBUG
     printf("width=%d, height=%d, channels=%d, FILTER_SIZE=%d\n", 
@@ -110,12 +78,7 @@ int main(int argc, char** argv) {
 #endif
 
     // Declare image and filter variables for host and device
-    float 
-    *h_filter, 
-    *h_out, 
-    *d_in, 
-    *d_filter, 
-    *d_out;
+    float *h_filter, *h_out, *d_in, *d_filter, *d_out;
 
     // size to allocate for image and filter variables
     unsigned int img_size         = width * height * CHANNELS * sizeof(float);
@@ -159,10 +122,11 @@ int main(int argc, char** argv) {
     // Have just enough blocks to cover whole image
     // The -1 is to cover the case where image dimensions are multiples of
     // BLOCKS_SIZE
-    int  gridXSize = 1 + ((width  - 1) / BLOCK_SIZE);
-    int  gridYSize = 1 + ((height - 1) / BLOCK_SIZE);
+    int gridXSize = 1 + ((width - 1) / BLOCK_SIZE);
+    int gridYSize = 1 + ((height - 1) / BLOCK_SIZE);
 #if DEBUG
-    printf("gridXSize=%d, gridYSize=%d, BLOCK_SIZE=%d\n", gridXSize, gridYSize, BLOCK_SIZE);
+    printf("gridXSize=%d, gridYSize=%d, BLOCK_SIZE=%d\n", 
+           gridXSize, gridYSize, BLOCK_SIZE);
 #endif
     dim3 h_gridDim(gridXSize, gridYSize);
     dim3 h_blockDim(BLOCK_SIZE, BLOCK_SIZE, CHANNELS);
