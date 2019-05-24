@@ -143,7 +143,7 @@ endif
 endif
 
 #INCLUDES += -IFreeImage/include
-LIBRARIES += -lcudart -lcudnn -lstdc++ -lm -lopencv_imgproc -lopencv_core -lopencv_highgui -lopencv_imgcodecs
+LIBRARIES += -lcudart -lstdc++ -lm -lopencv_imgproc -lopencv_core -lopencv_highgui -lopencv_imgcodecs
 
 ifeq ($(SAMPLE_ENABLED),0)
 EXEC ?= @echo "[@]"
