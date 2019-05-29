@@ -145,7 +145,8 @@ LIBRARIES :=
 endif
 
 INCLUDES := -I/usr/include
-INCLUDES := -I/$(CUDA_PATH)/targets/aarch64-linux/include
+INCLUDES := -I$(CUDA_PATH)/targets/aarch64-linux/include
+INCLUDES := -I$(CUDA_PATH)/samples/common/inc
 LIBRARIES := -L/usr/lib
 
 ################################################################################
@@ -172,7 +173,7 @@ SMS_VOLTA ?= 70
 endif
 endif
 
-SMS ?= 30 35 50 53 60 61 $(SMS_VOLTA) 75 
+SMS ?= 30 35 50 53 60 61 $(SMS_VOLTA) 
 
 $(info CUDA VERSION: $(CUDA_VERSION))
 $(info SMS: $(SMS))
@@ -194,7 +195,7 @@ endif
 endif
 
 #INCLUDES += -IFreeImage/include
-LIBRARIES += -lcudart -lstdc++ -lm -lopencv_imgproc -lopencv_core -lopencv_highgui -lopencv_imgcodecs
+LIBRARIES += -lcudart -lcudnn -lstdc++ -lm -lopencv_imgproc -lopencv_core -lopencv_highgui -lopencv_imgcodecs
 
 ifeq ($(SAMPLE_ENABLED),0)
 EXEC ?= @echo "[@]"
@@ -207,7 +208,7 @@ endif
 # Target rules
 all: build
 
-build: naive-conv
+build: naive-conv cudnn-conv
 
 check.deps:
 ifeq ($(SAMPLE_ENABLED),0)
@@ -216,9 +217,10 @@ else
 	@echo "Sample is ready - all dependencies have been met"
 endif
 
-OBJ = naive-conv.o
+naive-conv: naive-conv.o
+	$(EXEC) $(NVCC) $(ALL_LDFLAGS) $(GENCODE_FLAGS) -o $@ $+ $(INCLUDES) $(LIBRARIES)
 
-naive-conv: $(OBJ)
+cudnn-conv: cudnn-conv.o
 	$(EXEC) $(NVCC) $(ALL_LDFLAGS) $(GENCODE_FLAGS) -o $@ $+ $(INCLUDES) $(LIBRARIES)
 
 %.o: %.cpp
@@ -227,12 +229,10 @@ naive-conv: $(OBJ)
 %.o: %.cu
 	$(EXEC) $(NVCC) $(INCLUDES) $(ALL_CCFLAGS) $(GENCODE_FLAGS) -o $@ -c $<
 
-run: build
-	$(EXEC) ./naive-conv
-
 clean:
 	rm -rf *o
 	rm -rf naive-conv
-	rm output.png
+	rm -rf cudnn-conv
+	rm -rf *.png
 
 clobber: clean

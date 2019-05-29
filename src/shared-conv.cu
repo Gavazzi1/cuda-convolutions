@@ -15,7 +15,12 @@
 #define PRINT 1
 #define RANDOM 0
 
-__global__ void naive_kernel(float* d_in, int height, int width, int channels, float* filter, float* d_out) {
+__global__ void kernel(float* d_in, int height, int width, int channels, float* filter, float* d_out) {
+    // shared memory block - accessible to all threads in a block
+    // for each pixel in a block, you need access to all pixels in the block
+    // plus one radius of pixels on all sides
+    __shared__ float sh_data[BLOCK_SIZE + 2*RADIUS][BLOCK_SIZE + 2*RADIUS];
+
     // Get global position in grid
     unsigned int x = blockIdx.x * blockDim.x + threadIdx.x;
     unsigned int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -26,7 +31,12 @@ __global__ void naive_kernel(float* d_in, int height, int width, int channels, f
     // image, multiply that by the number of channels (3) and add the z value
     // representing whether the pixel is R, G, or B
     unsigned int loc = channels * (y * width + x) + z;
-    
+
+    // Copy into shared memory
+    sh_data[threadIdx.x][threadIdx.y] = (x-RADIUS < 0 || y-RADIUS < 0) ?
+                                        0 :
+                                        d_in[];
+
     // sum of all element-wise multiplications
     float sum = 0;
 
@@ -160,7 +170,7 @@ int main(int argc, char** argv) {
             sdkStartTimer(&hTimer);
         }
 
-        naive_kernel<<<h_gridDim, h_blockDim>>>(d_in, height, width, channels, d_filter, d_out);
+        kernel<<<h_gridDim, h_blockDim>>>(d_in, height, width, channels, d_filter, d_out);
     }
 
     // Get time
