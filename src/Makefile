@@ -203,12 +203,15 @@ endif
 
 endif
 
+BIN_DIR?=bin
+MKDIR=mkdir -p
+
 ################################################################################
 
 # Target rules
 all: build
 
-build: naive-conv cudnn-conv
+build: naive-conv
 
 check.deps:
 ifeq ($(SAMPLE_ENABLED),0)
@@ -217,11 +220,13 @@ else
 	@echo "Sample is ready - all dependencies have been met"
 endif
 
-naive-conv: naive-conv.o
-	$(EXEC) $(NVCC) $(ALL_LDFLAGS) $(GENCODE_FLAGS) -o $@ $+ $(INCLUDES) $(LIBRARIES)
+naive-conv: naive-conv.o main.o
+	$(MKDIR) $(BIN_DIR)
+	$(EXEC) $(NVCC) $(ALL_LDFLAGS) $(GENCODE_FLAGS) -o $(BIN_DIR)/$@ $+ $(INCLUDES) $(LIBRARIES)
 
 cudnn-conv: cudnn-conv.o
-	$(EXEC) $(NVCC) $(ALL_LDFLAGS) $(GENCODE_FLAGS) -o $@ $+ $(INCLUDES) $(LIBRARIES)
+	$(MKDIR) $(BIN_DIR)
+	$(EXEC) $(NVCC) $(ALL_LDFLAGS) $(GENCODE_FLAGS) -o $(BIN_DIR)/$@ $+ $(INCLUDES) $(LIBRARIES)
 
 %.o: %.cpp
 	$(EXEC) $(HOST_COMPILER) $(INCLUDES) $(CCFLAGS) $(EXTRA_CCFLAGS) -o $@ -c $<
@@ -230,9 +235,8 @@ cudnn-conv: cudnn-conv.o
 	$(EXEC) $(NVCC) $(INCLUDES) $(ALL_CCFLAGS) $(GENCODE_FLAGS) -o $@ -c $<
 
 clean:
-	rm -rf *o
-	rm -rf naive-conv
-	rm -rf cudnn-conv
+	rm -rf *.o
+	rm -rf $(BIN_DIR)/*
 	rm -rf *.png
 
 clobber: clean
