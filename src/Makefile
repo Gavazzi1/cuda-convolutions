@@ -211,7 +211,7 @@ MKDIR=mkdir -p
 # Target rules
 all: build
 
-build: naive-conv
+build: naive-conv constant-conv shared-conv cudnn-conv
 
 check.deps:
 ifeq ($(SAMPLE_ENABLED),0)
@@ -225,6 +225,14 @@ naive-conv: naive-conv.o main.o
 	$(EXEC) $(NVCC) $(ALL_LDFLAGS) $(GENCODE_FLAGS) -o $(BIN_DIR)/$@ $+ $(INCLUDES) $(LIBRARIES)
 
 cudnn-conv: cudnn-conv.o
+	$(MKDIR) $(BIN_DIR)
+	$(EXEC) $(NVCC) $(ALL_LDFLAGS) $(GENCODE_FLAGS) -o $(BIN_DIR)/$@ $+ $(INCLUDES) $(LIBRARIES)
+
+constant-conv: constant-conv.o
+	$(MKDIR) $(BIN_DIR)
+	$(EXEC) $(NVCC) $(ALL_LDFLAGS) $(GENCODE_FLAGS) -o $(BIN_DIR)/$@ $+ $(INCLUDES) $(LIBRARIES)
+
+shared-conv: shared-conv.o
 	$(MKDIR) $(BIN_DIR)
 	$(EXEC) $(NVCC) $(ALL_LDFLAGS) $(GENCODE_FLAGS) -o $(BIN_DIR)/$@ $+ $(INCLUDES) $(LIBRARIES)
 

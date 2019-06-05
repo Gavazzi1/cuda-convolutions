@@ -7,7 +7,7 @@
 
 #include "imgutils.h"
 
-#define RADIUS 1
+#define RADIUS 2
 #define FILTER_SIZE ((RADIUS * 2) + 1)
 #define BLOCK_SIZE 16
 #define ITERATIONS 128
@@ -15,43 +15,63 @@
 #define PRINT 1
 #define RANDOM 0
 
-__global__ void kernel(float* d_in, int height, int width, int channels, float* filter, float* d_out) {
-    // shared memory block - accessible to all threads in a block
-    // for each pixel in a block, you need access to all pixels in the block
-    // plus one radius of pixels on all sides
+__constant__ float c_filter[FILTER_SIZE*FILTER_SIZE];
+
+__global__ void kernel(float* d_in, int height, int width, float* d_out) {
+
+    // Note: filter radius can't be bigger than block size or else scheme for
+    // copying shared memory fails
     __shared__ float sh_data[BLOCK_SIZE + 2*RADIUS][BLOCK_SIZE + 2*RADIUS];
 
     // Get global position in grid
     unsigned int x = blockIdx.x * blockDim.x + threadIdx.x;
     unsigned int y = blockIdx.y * blockDim.y + threadIdx.y;
-    unsigned int z = threadIdx.z;
 
     // actual location within image data
     // since image data is interleaved RGB values, offset like you would a 2D
     // image, multiply that by the number of channels (3) and add the z value
     // representing whether the pixel is R, G, or B
-    unsigned int loc = channels * (y * width + x) + z;
-
-    // Copy into shared memory
-    sh_data[threadIdx.x][threadIdx.y] = (x-RADIUS < 0 || y-RADIUS < 0) ?
-                                        0 :
-                                        d_in[];
+    unsigned int loc = (y * width) + x;
 
     // sum of all element-wise multiplications
     float sum = 0;
 
+    // Copy to shared memory
+    int x_tmp = x - RADIUS;
+    int y_tmp = y - RADIUS;
+    sh_data[threadIdx.x][threadIdx.y] = 
+        (x_tmp < 0 || y_tmp < 0) ? 
+        0 : 
+        d_in[loc - RADIUS - width*RADIUS];
+
+    x_tmp = x + RADIUS;
+    sh_data[threadIdx.x + 2*RADIUS][threadIdx.y] = 
+        (x_tmp >= width || y_tmp < 0) ?
+        0 :
+        d_in[loc + RADIUS - width*RADIUS];
+
+    x_tmp = x - RADIUS;
+    y_tmp = y + RADIUS;
+    sh_data[threadIdx.x][threadIdx.y + 2*RADIUS] =
+        (x_tmp < 0 || y_tmp >= height) ?
+        0 :
+        d_in[loc - RADIUS + width*RADIUS];
+
+    x_tmp = x + RADIUS;
+    sh_data[threadIdx.x + 2*RADIUS][threadIdx.y + 2*RADIUS] =
+        (x_tmp >= width || y_tmp >= height) ?
+        0 :
+        d_in[loc + RADIUS + width*RADIUS];
+
+    __syncthreads();
+
     // only perform convolution on pixels within radius
     // Global memory use and O(N^2) loop in kernel kill performance
     if (x >= RADIUS && y >= RADIUS && x < (width - RADIUS) && y < (height - RADIUS)) {
-        int img_z = z;
 #pragma unroll
         for (int i = -RADIUS; i <= RADIUS; ++i) {
 #pragma unroll
             for (int j = -RADIUS; j <= RADIUS; ++j) {
-                // x, y, and global location adjusted for filter radius
-                int img_x   = x + i;
-                int img_y   = y + j;
-                int img_loc = channels * (img_y * width + img_x) + img_z;
 
                 // filter location based just on x and y
                 int filt_x     = i + RADIUS;
@@ -59,19 +79,12 @@ __global__ void kernel(float* d_in, int height, int width, int channels, float* 
                 int filter_loc = filt_y * FILTER_SIZE + filt_x;
 
                 // add element-wise product to accumulator
-                sum += d_in[img_loc] * filter[filter_loc];
+                sum += sh_data[threadIdx.x+RADIUS+i][threadIdx.y+RADIUS+j] * c_filter[filter_loc];
             }
         }
 
         // add pixel value to output
         d_out[loc] = sum;
-
-#if 0
-        if ((d_in[loc] - 0.0) > 0.001) {
-            printf("x=%d, y=%d, z=%d, loc=%d, d_in=%f, d_out=%f\n", 
-                   x, y, z, loc, d_in[loc], d_out[loc]);
-        }
-#endif
     }
 }
 
@@ -85,18 +98,12 @@ int main(int argc, char** argv) {
     cv::Mat h_in     = read_image_bw(argv[1]);
     int     height   = h_in.rows;
     int     width    = h_in.cols;
-    int     channels = h_in.channels();
-
-#if PRINT
-    printf("width=%d, height=%d, channels=%d, FILTER_SIZE=%d\n", 
-           width, height, channels, FILTER_SIZE);
-#endif
 
     // Declare image and filter variables for host and device
-    float *h_filter, *h_out, *d_in, *d_filter, *d_out;
+    float *h_filter, *h_out, *d_in, *d_out;
 
     // size to allocate for image and filter variables
-    unsigned int img_size         = width * height * channels * sizeof(float);
+    unsigned int img_size         = width * height * sizeof(float);
     unsigned int full_filter_size = FILTER_SIZE * FILTER_SIZE * sizeof(float);
 
 #if PRINT
@@ -114,9 +121,11 @@ int main(int argc, char** argv) {
     // Initialize filter template
     // clang-format off
     const float filt_template[FILTER_SIZE][FILTER_SIZE] = {
-        {0, 0, 0},
-        {0, 1, 0},
-        {0, 0, 0}
+        {1, 1,   1, 1, 1},
+        {1, 1,   1, 1, 1},
+        {1, 1, -24, 1, 1},
+        {1, 1,   1, 1, 1},
+        {1, 1,   1, 1, 1}
     };
     // clang-format on
 #endif
@@ -134,12 +143,11 @@ int main(int argc, char** argv) {
 
     // Allocate device data
     checkCudaErrors(cudaMalloc((void**)&d_in, img_size));
-    checkCudaErrors(cudaMalloc((void**)&d_filter, full_filter_size));
     checkCudaErrors(cudaMalloc((void**)&d_out, img_size));
 
     // Copy host memory to device
     checkCudaErrors(cudaMemcpy(d_in, h_in.data, img_size, cudaMemcpyHostToDevice));
-    checkCudaErrors(cudaMemcpy(d_filter, h_filter, full_filter_size, cudaMemcpyHostToDevice));
+    checkCudaErrors(cudaMemcpyToSymbol(c_filter, h_filter, full_filter_size));
 
     // Let grid size be based on block size
     // Have just enough blocks to cover whole image
@@ -152,7 +160,7 @@ int main(int argc, char** argv) {
            gridXSize, gridYSize, BLOCK_SIZE);
 #endif
     dim3 h_gridDim(gridXSize, gridYSize);
-    dim3 h_blockDim(BLOCK_SIZE, BLOCK_SIZE, channels);
+    dim3 h_blockDim(BLOCK_SIZE, BLOCK_SIZE);
 
     // Run on GPU 0
     cudaSetDevice(0);
@@ -170,7 +178,7 @@ int main(int argc, char** argv) {
             sdkStartTimer(&hTimer);
         }
 
-        kernel<<<h_gridDim, h_blockDim>>>(d_in, height, width, channels, d_filter, d_out);
+        kernel<<<h_gridDim, h_blockDim>>>(d_in, height, width, d_out);
     }
 
     // Get time
@@ -187,7 +195,6 @@ int main(int argc, char** argv) {
 
     // Free device data
     cudaFree(d_in);
-    cudaFree(d_filter);
     cudaFree(d_out);
 
     // Free host data
