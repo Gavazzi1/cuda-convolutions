@@ -236,6 +236,10 @@ shared-conv: shared-conv.o
 	$(MKDIR) $(BIN_DIR)
 	$(EXEC) $(NVCC) $(ALL_LDFLAGS) $(GENCODE_FLAGS) -o $(BIN_DIR)/$@ $+ $(INCLUDES) $(LIBRARIES)
 
+thread-per-filter-pixel: thread-per-filter-pixel.o
+	$(MKDIR) $(BIN_DIR)
+	$(EXEC) $(NVCC) $(ALL_LDFLAGS) $(GENCODE_FLAGS) -o $(BIN_DIR)/$@ $+ $(INCLUDES) $(LIBRARIES)
+
 %.o: %.cpp
 	$(EXEC) $(HOST_COMPILER) $(INCLUDES) $(CCFLAGS) $(EXTRA_CCFLAGS) -o $@ -c $<
 
