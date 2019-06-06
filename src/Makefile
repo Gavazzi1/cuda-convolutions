@@ -211,7 +211,7 @@ MKDIR=mkdir -p
 # Target rules
 all: build
 
-build: naive-conv constant-conv shared-conv cudnn-conv
+build: naive-conv constant-conv shared-conv thread-per-filter-pixel
 
 check.deps:
 ifeq ($(SAMPLE_ENABLED),0)

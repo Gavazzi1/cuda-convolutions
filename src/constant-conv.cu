@@ -15,6 +15,9 @@
 #define PRINT 1
 #define RANDOM 0
 
+// Constant memory for filter
+// Since constant memory is read only and has its own cache, this improves the
+// speed of accessing the filter
 __constant__ float c_filter[FILTER_SIZE*FILTER_SIZE];
 
 __global__ void kernel(float* d_in, int height, int width, float* d_out) {
@@ -141,6 +144,7 @@ int main(int argc, char** argv) {
     sdkCreateTimer(&hTimer);
 
     // Kernel call
+    // i=-1 is the warm up iteration
     for (int i = -1; i < ITERATIONS; ++i) {
 
         if (i == 0) {

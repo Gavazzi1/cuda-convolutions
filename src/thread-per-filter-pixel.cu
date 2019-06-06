@@ -4,20 +4,22 @@
 #include <time.h>
 #include <helper_cuda.h>
 #include <helper_timer.h>
+#include <cmath>
 
 #include "imgutils.h"
 
-#define RADIUS 2
+#define RADIUS 1
 #define FILTER_SIZE ((RADIUS * 2) + 1)
-#define BLOCK_SIZE 16
 #define ITERATIONS 128
 
 #define PRINT 1
-#define RANDOM 0
+#define RANDOM 1
 
 __constant__ float c_filter[FILTER_SIZE*FILTER_SIZE];
 
 __global__ void kernel(float* d_in, int height, int width, float* d_out) {
+
+    __shared__ float sh_out[blockDim.z];
 
     // Get global position in grid
     unsigned int x = blockIdx.x * blockDim.x + threadIdx.x;
@@ -32,14 +34,13 @@ __global__ void kernel(float* d_in, int height, int width, float* d_out) {
 
     // only perform convolution on pixels within radius
     if (x >= RADIUS && y >= RADIUS && x < (width - RADIUS) && y < (height - RADIUS) && z < FILTER_SIZE*FILTER_SIZE) {
-        // filter location is threadIdx.z
         atomicAdd(&d_out[loc], d_in[loc] * c_filter[z]);
     }
 }
 
 int main(int argc, char** argv) {
     if (argc < 2) {
-        printf("Usage: ./naive_conv <image>\n");
+        printf("Usage: ./naive-conv <image>\n");
         return 0;
     }
 
@@ -70,11 +71,9 @@ int main(int argc, char** argv) {
     // Initialize filter template
     // clang-format off
     const float filt_template[FILTER_SIZE][FILTER_SIZE] = {
-        {1, 1,   1, 1, 1},
-        {1, 1,   1, 1, 1},
-        {1, 1, -24, 1, 1},
-        {1, 1,   1, 1, 1},
-        {1, 1,   1, 1, 1}
+        {1,   1, 1},
+        {1,  -8, 1},
+        {1,   1, 1}
     };
     // clang-format on
 #endif
@@ -98,18 +97,35 @@ int main(int argc, char** argv) {
     checkCudaErrors(cudaMemcpy(d_in, h_in.data, img_size, cudaMemcpyHostToDevice));
     checkCudaErrors(cudaMemcpyToSymbol(c_filter, h_filter, full_filter_size));
 
+    // calculate next power of 2 up from # elements in filter
+    // this will help make the number of threads a power of 32
+    double log2FS = log2((double)(FILTER_SIZE*FILTER_SIZE));
+    double ceilFS = ceil(log2FS);
+    int nextpow2 = (int)pow(2, ceilFS);
+
+    // calculate block size
+    int maxNumThreads = 1024; // max threads per block
+    int maxFullBS = maxNumThreads/nextpow2; // max val of blockSize.x*blockSize.y
+    double maxBS = sqrt(maxFullBS); // max possible blockSize
+    double log2BS = log2(maxBS);          //
+    double floorLog = floor(log2BS);      // prev power of 2 from max block size
+    int prevpow2 = (int)pow(2, floorLog); //
+    int block_size = prevpow2;
+    //int block_size = (int)sqrt((1024.0 / (double)(FILTER_SIZE*FILTER_SIZE)));
+    //int nextpow2 = FILTER_SIZE*FILTER_SIZE;
+    
     // Let grid size be based on block size
     // Have just enough blocks to cover whole image
     // The -1 is to cover the case where image dimensions are multiples of
     // BLOCKS_SIZE
-    int gridXSize = 1 + ((width - 1) / BLOCK_SIZE);
-    int gridYSize = 1 + ((height - 1) / BLOCK_SIZE);
+    int gridXSize = 1 + ((width - 1) / block_size);
+    int gridYSize = 1 + ((height - 1) / block_size);
 #if PRINT
-    printf("gridXSize=%d, gridYSize=%d, BLOCK_SIZE=%d\n", 
-            gridXSize, gridYSize, BLOCK_SIZE);
+    printf("gridXSize=%d, gridYSize=%d, nextpow2=%d, block_size=%d\n", 
+            gridXSize, gridYSize, nextpow2, block_size);
 #endif
     dim3 h_gridDim(gridXSize, gridYSize);
-    dim3 h_blockDim(BLOCK_SIZE, BLOCK_SIZE, FILTER_SIZE*FILTER_SIZE);
+    dim3 h_blockDim(block_size, block_size, nextpow2);
 
     // Run on GPU 0
     cudaSetDevice(0);
@@ -135,6 +151,10 @@ int main(int argc, char** argv) {
     sdkStopTimer(&hTimer);
     double time = sdkGetTimerValue(&hTimer) / (double)ITERATIONS;
     printf("Kernel time = %.5f ms\n", time);
+    int nBlocks = gridXSize*gridYSize;
+    int nThreads = nBlocks*block_size*block_size*nextpow2;
+    printf("#Blocks=%d, #Threads=%d, Time/Thread=%f\n",
+           nBlocks, nThreads, time*1000000.0/(double)nThreads);
 
     // Copy result back to host
     checkCudaErrors(cudaMemcpy(h_out, d_out, img_size, cudaMemcpyDeviceToHost));

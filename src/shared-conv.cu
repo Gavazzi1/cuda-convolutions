@@ -7,21 +7,20 @@
 
 #include "imgutils.h"
 
-#define RADIUS 2
+#define RADIUS 1
 #define FILTER_SIZE ((RADIUS * 2) + 1)
 #define BLOCK_SIZE 16
 #define ITERATIONS 128
 
 #define PRINT 1
-#define RANDOM 0
+#define RANDOM 1
 
+// Constant memory for filter
+// Since constant memory is read only and has its own cache, this improves the
+// speed of accessing the filter
 __constant__ float c_filter[FILTER_SIZE*FILTER_SIZE];
 
 __global__ void kernel(float* d_in, int height, int width, float* d_out) {
-
-    // Note: filter radius can't be bigger than block size or else scheme for
-    // copying shared memory fails
-    __shared__ float sh_data[BLOCK_SIZE + 2*RADIUS][BLOCK_SIZE + 2*RADIUS];
 
     // Get global position in grid
     unsigned int x = blockIdx.x * blockDim.x + threadIdx.x;
@@ -33,10 +32,26 @@ __global__ void kernel(float* d_in, int height, int width, float* d_out) {
     // representing whether the pixel is R, G, or B
     unsigned int loc = (y * width) + x;
 
-    // sum of all element-wise multiplications
-    float sum = 0;
+    // Shared memory block is big enough for the full block plus one radius of
+    // pixels on all sides
+    __shared__ float sh_data[BLOCK_SIZE + 2*RADIUS][BLOCK_SIZE + 2*RADIUS];
 
     // Copy to shared memory
+    // It would be trivial for each thread to bring its corresponding pixel into
+    // shared memory but the pixels around the block must also be brought in.
+    // So, the following scheme is used to bring all pixels in.
+    // Note that RADIUS must be <= BLOCK_SIZE for the scheme to work.
+    //
+    // Each pixel copies four pixels, which are the four corners one RADIUS away
+    // For example, with RADIUS=2, O is this thread's pixel and the X's are the
+    // pixels brought into shared memory
+    //      0  1  2  3  4
+    //
+    //0     X           X
+    //1
+    //2           O
+    //3
+    //4     X           X
     int x_tmp = x - RADIUS;
     int y_tmp = y - RADIUS;
     sh_data[threadIdx.x][threadIdx.y] = 
@@ -64,6 +79,9 @@ __global__ void kernel(float* d_in, int height, int width, float* d_out) {
         d_in[loc + RADIUS + width*RADIUS];
 
     __syncthreads();
+
+    // sum of all element-wise multiplications
+    float sum = 0;
 
     // only perform convolution on pixels within radius
     // Global memory use and O(N^2) loop in kernel kill performance
@@ -121,11 +139,9 @@ int main(int argc, char** argv) {
     // Initialize filter template
     // clang-format off
     const float filt_template[FILTER_SIZE][FILTER_SIZE] = {
-        {1, 1,   1, 1, 1},
-        {1, 1,   1, 1, 1},
-        {1, 1, -24, 1, 1},
-        {1, 1,   1, 1, 1},
-        {1, 1,   1, 1, 1}
+        {1,   1, 1},
+        {1,  -8, 1},
+        {1,   1, 1}
     };
     // clang-format on
 #endif
@@ -170,6 +186,7 @@ int main(int argc, char** argv) {
     sdkCreateTimer(&hTimer);
 
     // Kernel call
+    // i=-1 is the warm up iteration
     for (int i = -1; i < ITERATIONS; ++i) {
 
         if (i == 0) {
@@ -186,11 +203,15 @@ int main(int argc, char** argv) {
     sdkStopTimer(&hTimer);
     double time = sdkGetTimerValue(&hTimer) / (double)ITERATIONS;
     printf("Kernel time = %.5f ms\n", time);
+    int nBlocks  = gridXSize*gridYSize;
+    int nThreads = nBlocks*BLOCK_SIZE*BLOCK_SIZE;
+    printf("#Blocks=%d, #Threads=%d, Time/Thread=%f\n",
+           nBlocks, nThreads, time*1000000.0/(double)nThreads);
 
     // Copy result back to host
     checkCudaErrors(cudaMemcpy(h_out, d_out, img_size, cudaMemcpyDeviceToHost));
 
-    // write image to file for displaying
+    // write image to file
     save_image_bw("output.png", h_out, height, width);
 
     // Free device data

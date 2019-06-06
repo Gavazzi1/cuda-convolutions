@@ -104,6 +104,7 @@ int main(int argc, char** argv) {
     sdkCreateTimer(&hTimer);
 
     // Kernel call
+    // i=-1 is warm up iteration
     for (int i = -1; i < ITERATIONS; ++i) {
 
         if (i == 0) {
@@ -127,7 +128,7 @@ int main(int argc, char** argv) {
     // Copy result back to host
     checkCudaErrors(cudaMemcpy(h_out, d_out, img_size, cudaMemcpyDeviceToHost));
 
-    // write image to file for displaying
+    // write image to file
     save_image_bw("output.png", h_out, height, width);
 
     // Free device data
