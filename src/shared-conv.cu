@@ -38,9 +38,10 @@ __global__ void kernel(float* d_in, int height, int width, float* d_out) {
 
     // Copy to shared memory
     // It would be trivial for each thread to bring its corresponding pixel into
-    // shared memory but the pixels around the block must also be brought in.
+    // shared memory but the pixels in the radius around each block must also be
+    // copied to shared memory.
+    //
     // So, the following scheme is used to bring all pixels in.
-    // Note that RADIUS must be <= BLOCK_SIZE for the scheme to work.
     //
     // Each pixel copies four pixels, which are the four corners one RADIUS away
     // For example, with RADIUS=2, O is this thread's pixel and the X's are the
@@ -52,6 +53,10 @@ __global__ void kernel(float* d_in, int height, int width, float* d_out) {
     //2           O
     //3
     //4     X           X
+    //
+    // Note that RADIUS must be <= BLOCK_SIZE for the scheme to work.
+    // If RADIUS > BLOCK_SIZE, each thread must pull in more than 4 pixels,
+    // which requires a more expensive copying scheme.
     int x_tmp = x - RADIUS;
     int y_tmp = y - RADIUS;
     sh_data[threadIdx.x][threadIdx.y] = 
